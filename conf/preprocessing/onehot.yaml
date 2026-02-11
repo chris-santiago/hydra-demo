@@ -1,0 +1,6 @@
+_target_: feature_engine.encoding.OneHotEncoder
+_convert_: all
+variables:
+  - sex
+  - embarked
+drop_last: false

@@ -1,0 +1,15 @@
+# Simple flat config for v3_hydra_basic.py
+# No defaults list, no config groups
+
+random_state: 42
+test_size: 0.2
+
+model:
+  name: logistic_regression  # Options: logistic_regression, random_forest, gradient_boosting
+  max_iter: 1000              # For logistic_regression
+  n_estimators: 100           # For random_forest, gradient_boosting
+  max_depth: null             # For random_forest, gradient_boosting
+  learning_rate: 0.1          # For gradient_boosting
+
+preprocessing:
+  encoding: ordinal           # Options: ordinal, onehot, mean

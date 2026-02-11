@@ -1,0 +1,7 @@
+_target_: feature_engine.encoding.OrdinalEncoder
+_convert_: all
+ignore_format: true
+missing_values: ignore
+variables:
+  - sex
+  - embarked

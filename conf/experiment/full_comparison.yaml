@@ -1,0 +1,13 @@
+# @package _global_
+
+# Full comparison experiment: comprehensive model evaluation
+defaults:
+  - override /model: random_forest
+  - override /preprocessing: mean
+
+model:
+  n_estimators: 200
+  max_depth: 10
+
+dataset:
+  test_size: 0.2

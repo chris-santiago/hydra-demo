@@ -1,0 +1,33 @@
+# Main configuration with defaults list (used by v4/v5/v6)
+defaults:
+  - dataset: titanic
+  - preprocessing: ordinal
+  - model: logistic_regression
+  - _self_
+
+random_state: 42
+
+# Imputers defined inline (not as config groups for simplicity)
+num_imputer:
+  _target_: feature_engine.imputation.MeanMedianImputer
+  _convert_: all
+  imputation_method: mean
+  variables:
+    - age
+    - fare
+
+cat_imputer:
+  _target_: feature_engine.imputation.CategoricalImputer
+  _convert_: all
+  imputation_method: frequent
+  variables:
+    - sex
+    - embarked
+
+# Custom output directory structure (used by v6)
+hydra:
+  run:
+    dir: outputs/${model._target_}/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: multirun/${now:%Y-%m-%d_%H-%M-%S}
+    subdir: ${hydra.job.override_dirname}

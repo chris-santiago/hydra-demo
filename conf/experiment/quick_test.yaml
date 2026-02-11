@@ -1,0 +1,12 @@
+# @package _global_
+
+# Quick test experiment: fast model with small dataset
+defaults:
+  - override /model: logistic_regression
+  - override /preprocessing: ordinal
+
+dataset:
+  test_size: 0.3  # Larger test set for quick validation
+
+model:
+  max_iter: 500   # Fewer iterations
