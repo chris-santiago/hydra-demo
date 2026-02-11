@@ -1,0 +1,10 @@
+random_state: 42
+test_size: 0.2
+model:
+  name: gradient_boosting
+  max_iter: 1000
+  n_estimators: 100
+  max_depth: null
+  learning_rate: 0.1
+preprocessing:
+  encoding: ordinal

@@ -1,0 +1,32 @@
+dataset:
+  test_size: 0.2
+  stratify: true
+preprocessing:
+  _target_: feature_engine.encoding.OrdinalEncoder
+  _convert_: all
+  ignore_format: true
+  missing_values: ignore
+  variables:
+  - sex
+  - embarked
+model:
+  _target_: sklearn.ensemble.RandomForestClassifier
+  n_estimators: 100
+  max_depth: null
+  random_state: ${random_state}
+  warm_start: true
+random_state: 42
+num_imputer:
+  _target_: feature_engine.imputation.MeanMedianImputer
+  _convert_: all
+  imputation_method: mean
+  variables:
+  - age
+  - fare
+cat_imputer:
+  _target_: feature_engine.imputation.CategoricalImputer
+  _convert_: all
+  imputation_method: frequent
+  variables:
+  - sex
+  - embarked
