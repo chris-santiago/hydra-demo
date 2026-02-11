@@ -34,12 +34,16 @@ Examples:
   uv run python src/v5_hydra_instantiate.py model=gradient_boosting model.n_estimators=200 +model.subsample=0.8
 """
 
+import logging
+
 import hydra
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig
 from sklearn.pipeline import Pipeline
 
 from utils import display_config, evaluate_model, load_titanic, save_artifacts
+
+log = logging.getLogger(__name__)
 
 
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
@@ -52,25 +56,26 @@ def main(cfg: DictConfig):
     display_config(cfg, "Hydra Configuration")
 
     # Load data
-    print("Loading Titanic dataset...")
+    log.info("Loading Titanic dataset...")
     X_train, X_test, y_train, y_test = load_titanic(
         test_size=cfg.dataset.test_size,
         random_state=cfg.random_state,
+        stratify=cfg.dataset.stratify,
     )
 
     # Build components with instantiate() - NO imports, NO registries!
-    print(f"Instantiating encoder: {cfg.preprocessing._target_}...")
+    log.info(f"Instantiating encoder: {cfg.preprocessing._target_}...")
     encoder = hydra.utils.instantiate(cfg.preprocessing)
 
-    print(f"Instantiating model: {cfg.model._target_}...")
+    log.info(f"Instantiating model: {cfg.model._target_}...")
     classifier = hydra.utils.instantiate(cfg.model)
 
-    print("Instantiating imputers...")
+    log.info("Instantiating imputers...")
     num_imputer = hydra.utils.instantiate(cfg.num_imputer)
     cat_imputer = hydra.utils.instantiate(cfg.cat_imputer)
 
     # Build pipeline
-    print("Building pipeline...")
+    log.info("Building pipeline...")
     pipeline = Pipeline(
         [
             ("num_imputer", num_imputer),
@@ -81,18 +86,18 @@ def main(cfg: DictConfig):
     )
 
     # Train
-    print("Training model...")
+    log.info("Training model...")
     pipeline.fit(X_train, y_train)
 
     # Evaluate
     metrics = evaluate_model(pipeline, X_test, y_test)
-    print(f"\n✓ Accuracy: {metrics['accuracy']:.4f}")
-    print(f"✓ F1 Score: {metrics['f1_score']:.4f}")
-    print(f"\n{metrics['classification_report']}")
+    log.info(f"Accuracy: {metrics['accuracy']:.4f}")
+    log.info(f"F1 Score: {metrics['f1_score']:.4f}")
+    log.info(f"\n{metrics['classification_report']}")
 
     # Save artifacts to Hydra's output directory
     output_dir = HydraConfig.get().runtime.output_dir
-    print(f"\nSaving artifacts to: {output_dir}")
+    log.info(f"Saving artifacts to: {output_dir}")
     save_artifacts(output_dir, pipeline, metrics, X_test, y_test)
 
     print("\n" + "=" * 60)

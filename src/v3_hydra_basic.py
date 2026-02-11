@@ -12,6 +12,8 @@ Pain points:
 - Flat config (no config groups yet)
 """
 
+import logging
+
 import hydra
 from feature_engine.encoding import MeanEncoder, OneHotEncoder, OrdinalEncoder
 from feature_engine.imputation import CategoricalImputer, MeanMedianImputer
@@ -21,6 +23,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 
 from utils import display_config, evaluate_model, load_titanic
+
+log = logging.getLogger(__name__)
 
 
 @hydra.main(version_base=None, config_path="../conf", config_name="config_v3")
@@ -33,14 +37,15 @@ def main(cfg: DictConfig):
     display_config(cfg, "Hydra Configuration")
 
     # Load data
-    print("Loading Titanic dataset...")
+    log.info("Loading Titanic dataset...")
     X_train, X_test, y_train, y_test = load_titanic(
         test_size=cfg.test_size,
         random_state=cfg.random_state,
+        # config_v3.yaml doesn't have dataset.stratify, so uses default (True)
     )
 
     # Still need if/elif for encoder selection
-    print("Selecting encoder...")
+    log.info("Selecting encoder...")
     if cfg.preprocessing.encoding == "ordinal":
         encoder = OrdinalEncoder(
             variables=["sex", "embarked"],
@@ -62,7 +67,7 @@ def main(cfg: DictConfig):
         raise ValueError(f"Unknown encoding: {cfg.preprocessing.encoding}")
 
     # Still need if/elif for model selection
-    print("Selecting model...")
+    log.info("Selecting model...")
     if cfg.model.name == "logistic_regression":
         classifier = LogisticRegression(
             max_iter=cfg.model.max_iter,
@@ -85,7 +90,7 @@ def main(cfg: DictConfig):
         raise ValueError(f"Unknown model: {cfg.model.name}")
 
     # Build pipeline
-    print("Building pipeline...")
+    log.info("Building pipeline...")
     pipeline = Pipeline(
         [
             (
@@ -105,14 +110,14 @@ def main(cfg: DictConfig):
     )
 
     # Train
-    print("Training model...")
+    log.info("Training model...")
     pipeline.fit(X_train, y_train)
 
     # Evaluate
     metrics = evaluate_model(pipeline, X_test, y_test)
-    print(f"\n✓ Accuracy: {metrics['accuracy']:.4f}")
-    print(f"✓ F1 Score: {metrics['f1_score']:.4f}")
-    print(f"\n{metrics['classification_report']}")
+    log.info(f"Accuracy: {metrics['accuracy']:.4f}")
+    log.info(f"F1 Score: {metrics['f1_score']:.4f}")
+    log.info(f"\n{metrics['classification_report']}")
 
     print("\n" + "=" * 60)
     print("IMPROVEMENTS:")

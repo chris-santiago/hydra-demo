@@ -13,6 +13,8 @@ Pain points:
 - Manual instantiation with **cfg boilerplate
 """
 
+import logging
+
 import hydra
 from feature_engine.encoding import MeanEncoder, OneHotEncoder, OrdinalEncoder
 from feature_engine.imputation import CategoricalImputer, MeanMedianImputer
@@ -22,6 +24,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 
 from utils import display_config, evaluate_model, load_titanic
+
+log = logging.getLogger(__name__)
 
 # Manual registries - still need to import everything!
 ENCODER_REGISTRY = {
@@ -63,18 +67,19 @@ def main(cfg: DictConfig):
     display_config(cfg, "Hydra Configuration with Groups")
 
     # Load data
-    print("Loading Titanic dataset...")
+    log.info("Loading Titanic dataset...")
     X_train, X_test, y_train, y_test = load_titanic(
         test_size=cfg.dataset.test_size,
         random_state=cfg.random_state,
+        stratify=cfg.dataset.stratify,
     )
 
     # Build encoder using registry (no more if/elif!)
-    print(f"Building encoder: {cfg.preprocessing._target_}...")
+    log.info(f"Building encoder: {cfg.preprocessing._target_}...")
     encoder = build_from_config(cfg.preprocessing, ENCODER_REGISTRY)
 
     # Build model using registry
-    print(f"Building model: {cfg.model._target_}...")
+    log.info(f"Building model: {cfg.model._target_}...")
     classifier = build_from_config(cfg.model, MODEL_REGISTRY)
 
     # Build imputers using registry
@@ -85,7 +90,7 @@ def main(cfg: DictConfig):
     )
 
     # Build pipeline
-    print("Building pipeline...")
+    log.info("Building pipeline...")
     pipeline = Pipeline(
         [
             ("num_imputer", num_imputer),
@@ -96,14 +101,14 @@ def main(cfg: DictConfig):
     )
 
     # Train
-    print("Training model...")
+    log.info("Training model...")
     pipeline.fit(X_train, y_train)
 
     # Evaluate
     metrics = evaluate_model(pipeline, X_test, y_test)
-    print(f"\n✓ Accuracy: {metrics['accuracy']:.4f}")
-    print(f"✓ F1 Score: {metrics['f1_score']:.4f}")
-    print(f"\n{metrics['classification_report']}")
+    log.info(f"Accuracy: {metrics['accuracy']:.4f}")
+    log.info(f"F1 Score: {metrics['f1_score']:.4f}")
+    log.info(f"\n{metrics['classification_report']}")
 
     print("\n" + "=" * 60)
     print("IMPROVEMENTS:")

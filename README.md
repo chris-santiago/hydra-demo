@@ -9,7 +9,7 @@ A step-by-step demonstration of Hydra's core concepts for ML experiment manageme
 3. **The Magic**: How `instantiate()` eliminates all boilerplate
 4. **Dynamic Parameters**: Adding new params without code changes (`+` syntax)
 5. **Experiment Tracking**: Automatic config saving and artifact management
-6. **Advanced Features**: Multirun sweeps, experiment presets, Compose API
+6. **Advanced Features**: Multirun sweeps, experiment presets, custom output dirs
 
 ## Setup
 
@@ -153,7 +153,11 @@ uv run python src/v5_hydra_instantiate.py model=random_forest model.n_estimators
 # That's it! No imports, no registries, no if/elif!
 encoder = hydra.utils.instantiate(cfg.preprocessing)
 classifier = hydra.utils.instantiate(cfg.model)
+num_imputer = hydra.utils.instantiate(cfg.num_imputer)
+cat_imputer = hydra.utils.instantiate(cfg.cat_imputer)
 ```
+
+**Key Improvement from v4**: In v4, imputers were still hardcoded in the Python script. In v5, **everything** is instantiated from config — models, encoders, AND imputers. This is the full power of `instantiate()`.
 
 **The Config** (`conf/model/random_forest.yaml`):
 ```yaml
@@ -201,13 +205,31 @@ uv run python src/v5_hydra_instantiate.py model=random_forest +model.warm_start=
 The `+` tells Hydra: "Add this key even though it's not in `conf/model/random_forest.yaml`."
 Since `instantiate()` passes all keys as `**kwargs`, it goes straight to `RandomForestClassifier(warm_start=True, ...)`.
 
+#### Override Syntax: The Full Trifecta
+
+Hydra supports three override modes:
+
+```bash
+# 1. Override existing key (errors if key doesn't exist)
+uv run python src/v5_hydra_instantiate.py model=random_forest model.n_estimators=500
+
+# 2. Add new key (+ prefix, errors if key already exists)
+uv run python src/v5_hydra_instantiate.py model=random_forest +model.warm_start=true
+
+# 3. Force set (++ prefix, works whether key exists or not)
+uv run python src/v5_hydra_instantiate.py model=random_forest ++model.n_estimators=500
+```
+
+| Syntax | Behavior | Use Case |
+|--------|----------|----------|
+| `key=value` | Override existing | Standard parameter tuning |
+| `+key=value` | Add new | Extending config with new params |
+| `++key=value` | Force set | Scripts/automation where key may or may not exist |
+
 **More Examples**:
 ```bash
 # Add penalty and solver to logistic regression
 uv run python src/v5_hydra_instantiate.py model=logistic_regression +model.penalty=l1 +model.solver=saga
-
-# Override existing param (no + needed)
-uv run python src/v5_hydra_instantiate.py model=random_forest model.n_estimators=500
 
 # Combine: swap + override existing + add new
 uv run python src/v5_hydra_instantiate.py model=gradient_boosting model.n_estimators=200 +model.subsample=0.8
@@ -234,6 +256,56 @@ Hydra automatically creates timestamped output directories with all experiment m
 - `classification_report.txt` — full sklearn classification report
 - `encoder_mapping.json` — fitted encoder's mapping (e.g., ordinal: `{"male": 0, "female": 1}`)
 - `feature_importance.csv` — if model supports `feature_importances_` (RF, GBM)
+
+#### 🗂️ Custom Output Directory Structure
+
+By default, Hydra creates output directories with timestamps. You can customize this structure in `conf/config.yaml`:
+
+```yaml
+hydra:
+  run:
+    dir: outputs/${model._target_}/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: multirun/${now:%Y-%m-%d_%H-%M-%S}
+    subdir: ${hydra.job.override_dirname}
+```
+
+This organizes outputs by model type:
+```
+outputs/
+├── sklearn.ensemble.RandomForestClassifier/
+│   ├── 2026-02-10_14-30-22/
+│   └── 2026-02-10_15-45-10/
+└── sklearn.linear_model.LogisticRegression/
+    └── 2026-02-10_14-35-55/
+```
+
+#### 📝 Automatic Logging Integration
+
+Hydra auto-configures Python's `logging` module (v3+):
+
+```python
+import logging
+
+log = logging.getLogger(__name__)
+
+@hydra.main(...)
+def main(cfg):
+    log.info("Training model...")  # Appears in both console and log file
+```
+
+**What Hydra does**:
+- Creates `<script_name>.log` in each output directory
+- Configures log formatting and levels
+- Captures all `log.info()`, `log.warning()`, etc. calls
+
+**Why use logging instead of print()**:
+- ✅ Automatically saved to `.log` files for each run
+- ✅ Configurable log levels (INFO, DEBUG, WARNING, etc.)
+- ✅ Timestamps and formatting included
+- ✅ Can filter/search logs across experiments
+
+**Note**: v1 and v2 use `print()` (no Hydra = no logging integration). v3-v6 use Python's `logging` module to take advantage of Hydra's auto-configuration.
 
 **Demo**:
 ```bash
@@ -270,7 +342,7 @@ cat outputs/$(ls -t outputs | head -1)/.hydra/overrides.yaml
 
 **Improvements**:
 - ✅ `instantiate()` replaced ALL boilerplate
-- ✅ Training script is ~15 lines (never needs to change!)
+- ✅ Training script is minimal (core training logic is ~10 lines, never needs to change!)
 - ✅ Adding new model = one YAML file
 - ✅ Dynamic params via `+model.param=value` (no code changes!)
 - ✅ Auto-saved config + custom artifacts
@@ -285,7 +357,7 @@ cat outputs/$(ls -t outputs | head -1)/.hydra/overrides.yaml
 
 #### 1. Multirun Sweeps
 
-Run multiple experiments in parallel:
+Run multiple experiments sequentially (one after another):
 
 ```bash
 # Sweep over 3 models
@@ -296,6 +368,8 @@ uv run python src/v6_hydra_advanced.py --multirun model=logistic_regression,rand
 ```
 
 Each run gets its own output directory under `multirun/YYYY-MM-DD_HH-MM-SS/`.
+
+**Note**: By default, Hydra runs jobs sequentially. For parallel execution, you need a launcher plugin like `hydra-joblib-launcher`.
 
 #### 2. Experiment Presets
 
@@ -323,43 +397,9 @@ model:
   max_iter: 500
 ```
 
-#### 3. Compose API (Programmatic Config)
+#### 3. Custom Output Directory
 
-For Jupyter notebooks, testing, or integration with other tools:
-
-```python
-from src.v6_hydra_advanced import compose_and_run
-
-# Programmatically run experiments
-accuracy = compose_and_run("gradient_boosting", "mean")
-```
-
-#### 4. Custom Output Directory Structure
-
-Organize outputs by model type and timestamp:
-
-**Config** (`conf/config.yaml`):
-```yaml
-hydra:
-  run:
-    dir: outputs/${model._target_}/${now:%Y-%m-%d_%H-%M-%S}
-  sweep:
-    dir: multirun/${now:%Y-%m-%d_%H-%M-%S}
-    subdir: ${hydra.job.override_dirname}
-```
-
-**Result**:
-```
-outputs/
-├── sklearn.ensemble.RandomForestClassifier/
-│   ├── 2026-02-10_14-30-22/
-│   │   ├── .hydra/
-│   │   ├── metrics.json
-│   │   └── ...
-│   └── 2026-02-10_15-45-10/
-└── sklearn.linear_model.LogisticRegression/
-    └── 2026-02-10_14-35-55/
-```
+v6 uses the same custom output directory structure as v5 (see v5 section above) to organize outputs by model type and timestamp.
 
 ---
 
@@ -514,6 +554,41 @@ random_state: ${random_state}     # References top-level key
 
 ---
 
+## Debugging Your Config
+
+Hydra provides built-in flags to inspect your configuration without running your app:
+
+### Print the Composed Config
+
+```bash
+# Show the final composed config
+uv run python src/v5_hydra_instantiate.py --cfg job
+
+# See how overrides affect the config
+uv run python src/v5_hydra_instantiate.py model=random_forest --cfg job
+```
+
+### Show Defaults Tree
+
+```bash
+# Show how config groups were composed
+uv run python src/v5_hydra_instantiate.py --info defaults-tree
+```
+
+### Show Available Config Groups
+
+```bash
+# List all available config groups (model, preprocessing, etc.)
+uv run python src/v5_hydra_instantiate.py --help
+```
+
+These flags work with **any** Hydra script and require **zero code changes**. They're essential for:
+- Understanding config composition
+- Debugging override issues
+- Teaching others about your config structure
+
+---
+
 ## Why Hydra?
 
 ### Before Hydra (Click)
@@ -555,6 +630,96 @@ def main(cfg):
 
 ---
 
+## Using Hydra in Jupyter Notebooks (Compose API)
+
+The `@hydra.main()` decorator is designed for scripts. For interactive use in Jupyter notebooks or testing, use the **Compose API**:
+
+```python
+from hydra import compose, initialize
+
+# Initialize Hydra with your config directory
+with initialize(version_base=None, config_path="../conf"):
+    # Compose a config with overrides
+    cfg = compose(config_name="config", overrides=["model=random_forest", "preprocessing=mean"])
+
+    # Use the config
+    print(cfg.model)
+
+    # Instantiate objects as usual
+    import hydra
+    classifier = hydra.utils.instantiate(cfg.model)
+```
+
+**Important Limitations**:
+- ⚠️ The Compose API **does NOT** create output directories
+- ⚠️ It does NOT configure logging
+- ⚠️ It only composes the config object
+
+**Use `@hydra.main()` for full Hydra features** (output dirs, logging, multirun). Use Compose API only for:
+- Jupyter notebooks
+- Unit tests
+- Quick experimentation
+- Integration with other tools
+
+---
+
+## Further Reading
+
+### Structured Configs (Dataclass-based Configs)
+
+This demo uses YAML files, but Hydra also supports **Structured Configs** using Python dataclasses for type safety and IDE auto-completion:
+
+```python
+from dataclasses import dataclass
+from hydra.core.config_store import ConfigStore
+
+@dataclass
+class ModelConfig:
+    _target_: str = "sklearn.ensemble.RandomForestClassifier"
+    n_estimators: int = 100
+    max_depth: int | None = None
+    random_state: int = 42
+
+cs = ConfigStore.instance()
+cs.store(name="random_forest", node=ModelConfig, group="model")
+```
+
+**Benefits**:
+- ✅ Type checking (int, str, etc.)
+- ✅ IDE auto-completion
+- ✅ Runtime validation
+- ✅ Better error messages
+
+**When to use**:
+- Large projects with many configs
+- Teams where type safety matters
+- When you want IDE support for config editing
+
+**Learn more**: [Hydra Structured Configs Docs](https://hydra.cc/docs/tutorials/structured_config/intro/)
+
+### Custom OmegaConf Resolvers
+
+OmegaConf supports custom resolvers for dynamic config values:
+
+```python
+from omegaconf import OmegaConf
+
+# Register a custom resolver
+OmegaConf.register_new_resolver("mul", lambda x, y: x * y)
+
+# Use in YAML
+# hidden_size: ${mul:${n_features},2}
+```
+
+**Common use cases**:
+- Math operations: `${mul:2,3}`, `${div:${batch_size},2}`
+- Environment variables: `${oc.env:HOME}`
+- Path operations: `${oc.env:HOME}/data`
+
+**Learn more**: [OmegaConf Custom Resolvers](https://omegaconf.readthedocs.io/en/latest/custom_resolvers.html)
+
+---
+
 ## Next Steps
 
 1. **Run the demos**: Start with v1 and progress through v6
@@ -568,9 +733,26 @@ def main(cfg):
 
 ## Common Pitfalls
 
-### 1. `_convert_: all` Required for Lists
+### 1. Understanding `version_base=None`
 
-Feature-engine expects Python lists, but Hydra/OmegaConf uses `ListConfig`.
+Every `@hydra.main()` call includes `version_base=None`:
+
+```python
+@hydra.main(version_base=None, config_path="../conf", config_name="config")
+def main(cfg: DictConfig):
+    ...
+```
+
+**What it means**:
+- `version_base=None` — Opt into the latest Hydra behavior (recommended for new projects)
+- `version_base="1.3"` — Lock compatibility to Hydra 1.3 behavior
+- Omitting it — Triggers a deprecation warning
+
+**Use `version_base=None`** unless you need to maintain compatibility with older Hydra versions.
+
+### 2. `_convert_: all` Required for Native Python Types
+
+When libraries expect native Python types (lists, dicts), but OmegaConf provides `ListConfig`/`DictConfig`, you need `_convert_: all`.
 
 **Wrong**:
 ```yaml
@@ -589,14 +771,38 @@ variables:
   - embarked
 ```
 
-### 2. Adding vs Overriding Parameters
+**General rule**: Any config passed to `instantiate()` that contains lists or dicts needs `_convert_: all` if the target library expects native Python types (feature-engine, many sklearn transformers, etc.).
+
+### 3. Hydra Changes Working Directory
+
+**The Problem**: Hydra changes the working directory to the output directory, breaking relative paths.
+
+```python
+# WRONG: This will fail!
+open("data/file.csv")  # FileNotFoundError: data is in project root, not output dir
+```
+
+**The Solution**: Use `hydra.utils.get_original_cwd()`:
+
+```python
+from hydra.utils import get_original_cwd
+import os
+
+# RIGHT: Get path relative to original project directory
+data_path = os.path.join(get_original_cwd(), "data", "file.csv")
+open(data_path)
+```
+
+**Note**: This demo doesn't encounter this issue because it uses `fetch_openml()` (downloads data), not local files.
+
+### 4. Adding vs Overriding Parameters
 
 - **Override existing param** (no prefix): `model.n_estimators=500`
 - **Add new param** (+ prefix): `+model.warm_start=true`
 
 If you forget `+` when adding a new param, Hydra will error.
 
-### 3. Config Composition Order
+### 5. Config Composition Order
 
 The `_self_` entry in defaults list matters:
 

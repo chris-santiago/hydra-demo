@@ -17,13 +17,14 @@ NUM_FEATURES = ["age", "fare"]
 TARGET_COL = "survived"
 
 
-def load_titanic(test_size: float = 0.2, random_state: int = 42):
+def load_titanic(test_size: float = 0.2, random_state: int = 42, stratify: bool = True):
     """
     Load Titanic dataset from OpenML and prepare train/test split.
 
     Args:
         test_size: Fraction of data to use for testing
         random_state: Random seed for reproducibility
+        stratify: Whether to stratify the split by target variable
 
     Returns:
         Tuple of (X_train, X_test, y_train, y_test) as pandas DataFrames/Series
@@ -45,7 +46,11 @@ def load_titanic(test_size: float = 0.2, random_state: int = 42):
 
     # Split into train/test
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state, stratify=y
+        X,
+        y,
+        test_size=test_size,
+        random_state=random_state,
+        stratify=y if stratify else None,
     )
 
     return X_train, X_test, y_train, y_test
