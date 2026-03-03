@@ -6,7 +6,6 @@ from typing import Any
 
 import pandas as pd
 from omegaconf import DictConfig, OmegaConf
-from sklearn.datasets import fetch_openml
 from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.model_selection import train_test_split
 
@@ -29,9 +28,9 @@ def load_titanic(test_size: float = 0.2, random_state: int = 42, stratify: bool 
     Returns:
         Tuple of (X_train, X_test, y_train, y_test) as pandas DataFrames/Series
     """
-    # Fetch Titanic dataset
-    titanic = fetch_openml("titanic", version=1, as_frame=True, parser="auto")
-    df = titanic.frame
+    # Load Titanic dataset from local CSV
+    csv_path = Path(__file__).parent.parent / "data" / "titanic.csv"
+    df = pd.read_csv(csv_path)
 
     # Select features and target
     X = df[FEATURE_COLS].copy()
