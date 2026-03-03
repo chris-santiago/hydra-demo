@@ -19,4 +19,3 @@ dependencies:
   - readline=8.3
   - tk=8.6.13
   - tzdata=2025c
-prefix: /opt/homebrew/Caskroom/miniforge/base/envs/hydra-demo
