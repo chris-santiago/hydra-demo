@@ -397,6 +397,8 @@ model:
   max_iter: 500
 ```
 
+**What `# @package _global_` means**: This is a Hydra directive (not a regular comment). Without it, keys in a config group file are namespaced under their group name — so everything here would nest under `experiment:` and do nothing. `_global_` tells Hydra to merge the contents directly into the root namespace, so `dataset.test_size` overrides the top-level `dataset.test_size` in `config.yaml`.
+
 #### 3. Custom Output Directory
 
 v6 uses the same custom output directory structure as v5 (see v5 section above) to organize outputs by model type and timestamp.
@@ -561,12 +563,23 @@ Hydra provides built-in flags to inspect your configuration without running your
 ### Print the Composed Config
 
 ```bash
-# Show the final composed config
+# Show your app's resolved config (what cfg contains when main() runs)
 uv run python src/v5_hydra_instantiate.py --cfg job
 
 # See how overrides affect the config
 uv run python src/v5_hydra_instantiate.py model=random_forest --cfg job
+
+# Show Hydra's own internal config (output dirs, logging setup, launcher)
+uv run python src/v5_hydra_instantiate.py --cfg hydra
+
+# Show both combined
+uv run python src/v5_hydra_instantiate.py --cfg all
 ```
+
+**When to use each**:
+- `--cfg job` — Day-to-day debugging. Shows the exact config your code will receive, with all interpolations resolved and overrides applied, **without running the script**.
+- `--cfg hydra` — When something is wrong with output directories, logging, or the launcher. Exposes Hydra internals you don't normally see.
+- `--cfg all` — Full picture of both combined.
 
 ### Show Defaults Tree
 
@@ -626,7 +639,7 @@ def main(cfg):
 | Config saving | Manual implementation | Automatic |
 | Experiment tracking | Manual implementation | Automatic |
 | Reproducibility | Hope you saved CLI args | `.hydra/overrides.yaml` |
-| Code complexity | 100+ lines w/ if/elif | ~15 lines |
+| Code complexity | Dispatcher + registry + if/elif | 4 `instantiate()` calls |
 
 ---
 
@@ -654,6 +667,23 @@ with initialize(version_base=None, config_path="../conf"):
 - ⚠️ The Compose API **does NOT** create output directories
 - ⚠️ It does NOT configure logging
 - ⚠️ It only composes the config object
+
+Since there's no automatic output directory, handle artifacts manually if needed:
+
+```python
+from pathlib import Path
+from datetime import datetime
+from omegaconf import OmegaConf
+
+with initialize(version_base=None, config_path="../conf"):
+    cfg = compose(config_name="config", overrides=["model=random_forest"])
+    classifier = hydra.utils.instantiate(cfg.model)
+
+    # Manually create output directory and save config for reproducibility
+    out_dir = Path("outputs") / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "config.yaml").write_text(OmegaConf.to_yaml(cfg))
+```
 
 **Use `@hydra.main()` for full Hydra features** (output dirs, logging, multirun). Use Compose API only for:
 - Jupyter notebooks
@@ -793,16 +823,52 @@ data_path = os.path.join(get_original_cwd(), "data", "file.csv")
 open(data_path)
 ```
 
-**Note**: This demo doesn't encounter this issue because it uses `fetch_openml()` (downloads data), not local files.
+**Note**: This demo avoids this issue by loading the CSV with `Path(__file__).parent.parent / "data"` — an absolute path anchored to the script file itself, not the working directory. Any new data loading code should follow the same pattern.
 
-### 4. Adding vs Overriding Parameters
+### 4. `_recursive_: false` for Nested Configs
+
+By default, `instantiate()` is recursive — if a config has a nested dict that also contains `_target_`, Hydra will try to instantiate that too. This is usually correct, but can cause unexpected errors:
+
+```yaml
+# Hydra will try to instantiate both the Pipeline AND the StandardScaler:
+model:
+  _target_: sklearn.pipeline.Pipeline
+  steps:
+    - _target_: sklearn.preprocessing.StandardScaler
+```
+
+To disable recursive instantiation for a specific node:
+
+```yaml
+model:
+  _target_: sklearn.pipeline.Pipeline
+  _recursive_: false   # instantiate Pipeline only; leave steps as plain data
+  steps: ...
+```
+
+**Rule of thumb**: If `instantiate()` throws unexpected errors about nested configs, `_recursive_: false` is usually the fix.
+
+### 5. Config Validation — Typos Are Caught Immediately
+
+If you mistype a key without the `+` prefix, Hydra errors with a helpful message rather than silently ignoring it or crashing later:
+
+```bash
+# Typo without + prefix → immediate, descriptive error
+uv run python src/v5_hydra_instantiate.py model.warm_strat=true
+# Error: Key 'warm_strat' not in 'random_forest'. Use '+model.warm_strat=true' to add a new key.
+```
+
+This is a significant improvement over Click/argparse, where mistyped flags are often silently ignored or produce cryptic `TypeError` messages deep in user code.
+
+### 6. Adding vs Overriding Parameters
 
 - **Override existing param** (no prefix): `model.n_estimators=500`
 - **Add new param** (+ prefix): `+model.warm_start=true`
+- **Force set** (++ prefix, works either way): `++model.n_estimators=500`
 
-If you forget `+` when adding a new param, Hydra will error.
+If you forget `+` when adding a new param, Hydra will error immediately with a clear message.
 
-### 5. Config Composition Order
+### 7. Config Composition Order
 
 The `_self_` entry in defaults list matters:
 

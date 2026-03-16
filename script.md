@@ -41,7 +41,7 @@ By the end of this demo, you'll understand:
 
 I know some of you are thinking: "Another config framework? Really?"
 
-Stick with me. This isn't just about YAML files. This is about fundamentally rethinking how we build ML experiments. And I promise, by version 5, you'll see why Hydra has become the de facto standard at places like Meta, FAIR, and across research labs worldwide.
+Stick with me. This isn't just about YAML files. This is about fundamentally rethinking how we build ML experiments. And I promise, by version 5, you'll see why Hydra is the config backbone for projects like Meta's fairseq (language models), detectron2 (computer vision), and hundreds of published research codebases.
 
 Ready? Let's start at the beginning—the painful beginning.
 
@@ -208,7 +208,7 @@ We've traded one problem for several new ones:
 You're reading the RandomForest docs, and you discover `warm_start=True`. "Interesting," you think. "Let me try that." In an ideal world, you'd just run:
 
 ```bash
-python train.py --model random_forest --warm-start true
+uv run python src/v2_click.py --model random_forest --warm-start true
 ```
 
 But you can't. Because `warm_start` doesn't exist in your CLI yet. So here's what you **actually** have to do:
@@ -279,10 +279,34 @@ model:
 uv run python src/v3_hydra_basic.py model.name=random_forest
 ```
 
+**[After it runs — open the outputs directory]**
+
+```bash
+ls outputs/
+```
+
+Look at that. Hydra created a timestamped directory automatically. Let's look inside:
+
+```bash
+ls outputs/$(ls outputs/ | tail -1)/
+# .hydra/  v3_hydra_basic.log
+```
+
+```bash
+cat outputs/$(ls outputs/ | tail -1)/.hydra/overrides.yaml
+# - model.name=random_forest
+```
+
+**[Let that sink in]**
+
+You ran an experiment. You closed your terminal. You came back a week later. And you can **still** see exactly what you ran — `model.name=random_forest`. Not because you remembered to log it. Not because you checked git. Because Hydra saved it by default.
+
+This is the behavior that solves the 2am problem from our introduction.
+
 **[Explain the improvements]**
 
 ✅ **Structured YAML configuration** (dot notation for overrides)
-✅ **Auto-saved in outputs/** (every run documented)
+✅ **Auto-saved in outputs/** (every run documented — `overrides.yaml`, full log)
 ✅ **Cleaner CLI** (no more --flags everywhere)
 
 But... **we still have if/elif chains**:
@@ -304,7 +328,7 @@ And the config is flat — no composition yet.
 
 ```
 conf/
-├── config.yaml              # Main config
+├── config.yaml              # Main config with defaults list
 ├── model/
 │   ├── logistic_regression.yaml
 │   ├── random_forest.yaml
@@ -315,6 +339,27 @@ conf/
     └── mean.yaml
 ```
 
+**[Show the main config — explain the defaults list]**
+
+```yaml
+# conf/config.yaml
+defaults:
+  - dataset: titanic
+  - preprocessing: ordinal
+  - model: logistic_regression
+  - _self_
+```
+
+**[Explain each line]**
+
+The `defaults` list is the heart of Hydra's composition system. Each entry tells Hydra which YAML file to load from a config group:
+
+- `model: logistic_regression` → load `conf/model/logistic_regression.yaml` and merge it under the `model` key
+- `preprocessing: ordinal` → load `conf/preprocessing/ordinal.yaml` under `preprocessing`
+- `_self_` → merge the rest of `config.yaml` itself last (keys in the file take lowest precedence by default; `_self_` at the end makes them highest)
+
+When you run `model=random_forest` on the CLI, Hydra replaces the `model: logistic_regression` default with `model: random_forest`. One flag swaps the entire model config.
+
 **[Show a model config]**
 
 ```yaml
@@ -324,6 +369,14 @@ n_estimators: 100
 max_depth: null
 random_state: ${random_state}
 ```
+
+**[Point out `_target_` and `${random_state}` — plant the seed]**
+
+Two things to notice here:
+
+1. **`_target_`** — This is a special Hydra key that says "when someone calls `instantiate()` on this config, build this Python class." We're just seeing it here for the first time. Version 5 is where it pays off.
+
+2. **`${random_state}`** — This is OmegaConf variable interpolation. `random_state` is defined at the top level of `config.yaml`, and `${random_state}` is a reference to it. If you change `random_state: 42` to `random_state: 99` in the main config (or on the CLI), every YAML that references it updates automatically. No copy-pasting values across files.
 
 **[Run the demo]**
 
@@ -744,11 +797,21 @@ model.n_estimators=500
 
 | Syntax | Behavior | Use Case |
 |--------|----------|----------|
-| `key=value` | Override existing | Standard tuning |
-| `+key=value` | Add new | Extending config |
-| `++key=value` | Force set | Scripts where key may/may not exist |
+| `key=value` | Override existing (error if missing) | Standard tuning |
+| `+key=value` | Add new (error if already exists) | Extending config |
+| `++key=value` | Force set (works either way) | Automation scripts |
 
-The `++` is useful for automation where you're not sure if a key exists.
+**[Demo `++` with a concrete example]**
+
+```bash
+# This fails if n_estimators is already in the YAML (it is):
+# +model.n_estimators=500  → Error: Key already exists
+
+# This always works:
+uv run python src/v5_hydra_instantiate.py model=random_forest ++model.n_estimators=500
+```
+
+The `++` is most useful in CI/CD scripts or Makefile targets where you want a single command to work regardless of whether the key is in the base YAML or not.
 
 ---
 
@@ -858,6 +921,14 @@ model:
   max_iter: 500
 ```
 
+**[Explain `# @package _global_`]**
+
+That comment at the top is a Hydra directive, not a regular comment. By default, keys in a config group file are namespaced under their group name — so a file in `conf/experiment/` would nest its contents under `experiment:`. That's not what we want here; we want to **override the top-level config**.
+
+`# @package _global_` tells Hydra: "merge the contents of this file directly into the root namespace." That's why `defaults:` and `dataset:` here override the same top-level keys in `config.yaml`.
+
+Without this directive, `dataset.test_size` would become `experiment.dataset.test_size` — a completely different key that does nothing.
+
 **[Run it]**
 
 ```bash
@@ -906,17 +977,27 @@ Easy to compare all RandomForest runs vs all LogisticRegression runs.
 Hydra has debugging tools that require **zero code changes**:
 
 ```bash
-# Print the final composed config (without running)
+# Print your app's resolved config (the cfg your main() receives)
 uv run python src/v5_hydra_instantiate.py --cfg job
 
-# See how defaults were composed
+# Print Hydra's own internal config (output dirs, logging setup, launcher)
+uv run python src/v5_hydra_instantiate.py --cfg hydra
+
+# Print both combined
+uv run python src/v5_hydra_instantiate.py --cfg all
+
+# See how defaults were composed (great for debugging group resolution)
 uv run python src/v5_hydra_instantiate.py --info defaults-tree
 
 # Show help with available options
 uv run python src/v5_hydra_instantiate.py --help
 ```
 
-**[Run --cfg job example]**
+**[Run --cfg job example, then --cfg hydra]**
+
+`--cfg job` is your day-to-day debugging tool — it shows exactly what config your code will receive, with all interpolations resolved and overrides applied, **without running the script**.
+
+`--cfg hydra` is useful when something is wrong with output directories, logging, or the launcher — it exposes the Hydra internals you don't normally see.
 
 This is invaluable for understanding config composition.
 
@@ -977,11 +1058,51 @@ data_path = os.path.join(get_original_cwd(), "data", "file.csv")
 open(data_path)
 ```
 
-This demo doesn't hit this because we use `fetch_openml()`.
+This demo avoids this by loading the CSV with `Path(__file__).parent.parent / "data"` — an absolute path anchored to the script file itself, not the working directory. Any new data loading code should follow the same pattern.
 
 ---
 
-#### 4. Override Syntax Errors
+#### 4. `_recursive_: false` for Nested Configs
+
+By default, `instantiate()` is recursive — if your config has a nested dict that also contains a `_target_` key, Hydra will try to instantiate that too. This is usually what you want, but it can cause surprising behavior:
+
+```yaml
+# If you ever nest _target_ objects inside each other:
+model:
+  _target_: sklearn.pipeline.Pipeline
+  steps:
+    - _target_: sklearn.preprocessing.StandardScaler  # ← also instantiated!
+```
+
+To disable recursive instantiation for a specific node:
+
+```yaml
+model:
+  _target_: sklearn.pipeline.Pipeline
+  _recursive_: false   # ← instantiate Pipeline only, leave steps as-is
+  steps: ...
+```
+
+**Rule of thumb:** If `instantiate()` is throwing unexpected errors about nested configs, `_recursive_: false` is usually the fix.
+
+---
+
+#### 5. Config Validation — Typos Are Caught Immediately
+
+One underrated Hydra feature: if you mistype a key without the `+` prefix, Hydra **errors immediately** with a helpful message listing valid keys.
+
+```bash
+# Typo: forgot the + prefix
+uv run python src/v5_hydra_instantiate.py model.warm_strat=true
+# Error: Key 'warm_strat' not in 'random_forest'. Did you mean 'warm_start'?
+# Use '+model.warm_strat=true' to add a new key.
+```
+
+Compare that to Click, where a mistyped flag is silently ignored or causes a cryptic `TypeError`. Hydra fails fast and tells you exactly what went wrong.
+
+---
+
+#### 6. Override Syntax Errors
 
 ```bash
 # Override existing (errors if doesn't exist)
@@ -1003,6 +1124,7 @@ The `@hydra.main()` decorator is for scripts. For notebooks, use the **Compose A
 
 ```python
 from hydra import compose, initialize
+import hydra
 
 with initialize(version_base=None, config_path="../conf"):
     cfg = compose(config_name="config", overrides=["model=random_forest"])
@@ -1012,6 +1134,26 @@ with initialize(version_base=None, config_path="../conf"):
 ```
 
 **Important:** Compose API **does NOT** create output directories or configure logging. It only composes the config object.
+
+Since there's no automatic output directory, handle artifacts manually:
+
+```python
+from pathlib import Path
+from datetime import datetime
+
+with initialize(version_base=None, config_path="../conf"):
+    cfg = compose(config_name="config", overrides=["model=random_forest"])
+
+    classifier = hydra.utils.instantiate(cfg.model)
+
+    # Manually create output directory if you want to save artifacts
+    out_dir = Path("outputs") / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save config for reproducibility
+    from omegaconf import OmegaConf
+    (out_dir / "config.yaml").write_text(OmegaConf.to_yaml(cfg))
+```
 
 ---
 
@@ -1096,7 +1238,7 @@ Here's what changed:
 | Swap configurations | Coordinate 10 CLI flags | `model=random_forest` (one flag) |
 | Track experiments | Manual logging, hope you saved args | Automatic, everything saved |
 | Reproduce results | Pray you remember | `cat .hydra/overrides.yaml` and re-run |
-| Code complexity | 100+ lines of if/elif | ~10 lines of core logic |
+| Code complexity | Dispatcher + registry + if/elif | 4 `instantiate()` calls |
 
 **[Pause to let that sink in]**
 
@@ -1153,6 +1295,7 @@ Alright, I'll stop talking now. Let's discuss. What questions do you have?
 - "What about hyperparameter tuning?" (Perfect use case - multirun with Optuna plugin)
 - "Can I use this with PyTorch/TensorFlow?" (Absolutely - works with any Python code)
 - "What's the performance overhead?" (Negligible - imports happen once at startup)
+- "What about CI/CD?" (Hydra works great with automation, especially `++` syntax for scripts where a key may or may not exist)
 
 ---
 
@@ -1191,11 +1334,6 @@ uv run python src/v6_hydra_advanced.py +experiment=full_comparison
 - If short on time, combine v1+v2 into "The Pain" (3 min total)
 - If very short, skip v3 and go straight to v4
 - The critical section is v5 (the "aha!" moment) - don't rush this
-
-**Common questions:**
-- "Is this overkill for small projects?" → Maybe, but once you learn it, the overhead is minimal
-- "What about CI/CD?" → Hydra works great with automation, especially `++` syntax
-- "Performance overhead?" → Negligible - the import happens once at startup
 
 **Demo tips:**
 - Have all commands in a separate terminal buffer ready to paste
