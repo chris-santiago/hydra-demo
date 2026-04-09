@@ -16,6 +16,19 @@ style: |
   code { background: #e2e8f0; color: #4338ca; border-radius: 4px; padding: 0.1em 0.35em; font-size: 0.95em; }
   pre { background: #1e293b; border-left: 3px solid #6366f1; border-radius: 6px; padding: 1em 1.2em; }
   pre code { color: #e2e8f0; background: transparent; font-size: 0.88em; }
+  pre code .hljs-attr      { color: #7dd3fc; }
+  pre code .hljs-string    { color: #86efac; }
+  pre code .hljs-number    { color: #fda4af; }
+  pre code .hljs-literal   { color: #c4b5fd; }
+  pre code .hljs-comment   { color: #94a3b8; font-style: italic; }
+  pre code .hljs-keyword   { color: #f9a8d4; }
+  pre code .hljs-built_in  { color: #6ee7b7; }
+  pre code .hljs-name      { color: #7dd3fc; }
+  pre code .hljs-title     { color: #fbbf24; }
+  pre code .hljs-variable  { color: #fda4af; }
+  pre code .hljs-params    { color: #e2e8f0; }
+  pre code .hljs-meta      { color: #94a3b8; }
+  pre code .hljs-decorator { color: #fbbf24; }
   strong { color: #7c3aed; }
   em { color: #0369a1; font-style: normal; }
   ul { margin: 0.4em 0; }
